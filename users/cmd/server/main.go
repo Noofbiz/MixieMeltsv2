@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
+	"github.com/rs/cors"
 )
 
 var db *database.DB
@@ -38,6 +39,15 @@ func main() {
 	r.Use(middleware.Logger)    // Logs requests to the console
 	r.Use(middleware.Recoverer) // Recovers from panics without crashing
 	r.Use(middleware.Timeout(60 * time.Second))
+
+	// CORS middleware
+	r.Use(cors.New(cors.Options{
+		AllowedOrigins:   []string{"frontend:"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           300, // Maximum value not ignored by any major browsers
+	}).Handler)
 
 	// Public routes for local auth
 	r.Post("/api/users/register", h.RegisterUser)

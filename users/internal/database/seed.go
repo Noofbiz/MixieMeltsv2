@@ -29,6 +29,7 @@ func (db *DB) Seed(ctx context.Context) {
 			Username: "admin",
 			Email:    "admin@example.com",
 			Password: "password",
+			IsAdmin:  true,
 		},
 		{
 			Username: "user",

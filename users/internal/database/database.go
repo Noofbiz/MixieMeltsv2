@@ -40,6 +40,7 @@ func (db *DB) createTables(ctx context.Context) error {
 		username VARCHAR(255) NOT NULL,
 		email VARCHAR(255) UNIQUE NOT NULL,
 		password VARCHAR(255) NOT NULL,
+		is_admin BOOLEAN DEFAULT false,
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	);
@@ -51,12 +52,12 @@ func (db *DB) createTables(ctx context.Context) error {
 // CreateUser inserts a new user into the database.
 func (db *DB) CreateUser(ctx context.Context, user *models.User) (int64, error) {
 	query := `
-	INSERT INTO users (username, email, password)
-	VALUES ($1, $2, $3)
+	INSERT INTO users (username, email, password, is_admin)
+	VALUES ($1, $2, $3, $4)
 	RETURNING id;
 	`
 	var userID int64
-	err := db.QueryRow(ctx, query, user.Username, user.Email, user.Password).Scan(&userID)
+	err := db.QueryRow(ctx, query, user.Username, user.Email, user.Password, user.IsAdmin).Scan(&userID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create user: %w", err)
 	}
@@ -66,8 +67,8 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) (int64, error) 
 // GetUserByEmail retrieves a user from the database by their email.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	user := &models.User{}
-	query := "SELECT id, username, email, password, created_at, updated_at FROM users WHERE email = $1"
-	err := db.QueryRow(ctx, query, email).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.CreatedAt, &user.UpdatedAt)
+	query := "SELECT id, username, email, password, is_admin, created_at, updated_at FROM users WHERE email = $1"
+	err := db.QueryRow(ctx, query, email).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.IsAdmin, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return user, fmt.Errorf("user not found in database with emal: %w", err)
@@ -80,8 +81,8 @@ func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, e
 // GetUserByID retrieves a user from the database by their ID.
 func (db *DB) GetUserByID(ctx context.Context, id int64) (*models.User, error) {
 	user := &models.User{}
-	query := "SELECT id, username, email, password, created_at, updated_at FROM users WHERE id = $1"
-	err := db.QueryRow(ctx, query, id).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.CreatedAt, &user.UpdatedAt)
+	query := "SELECT id, username, email, password, is_admin, created_at, updated_at FROM users WHERE id = $1"
+	err := db.QueryRow(ctx, query, id).Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.IsAdmin, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // No user found is not an error

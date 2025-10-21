@@ -15,6 +15,7 @@ import (
 	"com.MixieMelts.users/internal/auth"
 	"com.MixieMelts.users/internal/database"
 	"com.MixieMelts.users/internal/models"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -82,7 +83,9 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.db.GetUserByEmail(r.Context(), creds.Email)
 	if err != nil || user == nil {
-		respondWithError(w, http.StatusUnauthorized, "Invalid credentials")
+		spew.Dump(user)
+		spew.Dump(creds)
+		respondWithError(w, http.StatusUnauthorized, "Invalid credentialzorz!")
 		return
 	}
 

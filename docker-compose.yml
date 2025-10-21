@@ -40,6 +40,20 @@ services:
       - "8081:80"
     depends_on:
       - users
+      - products
+    networks:
+      - mixienet
+
+  products:
+    build:
+      context: ./products
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgres://user:password@postgres/dbname?sslmode=disable
     networks:
       - mixienet
 

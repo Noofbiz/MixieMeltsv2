@@ -1,4 +1,5 @@
 import { useAuth } from "../context/Context";
+import AddProductForm from "./AddProductForm";
 
 const mockOrders = [
   {
@@ -185,6 +186,12 @@ const AccountPage = () => {
             ))}
           </div>
         </div>
+
+        {user.is_admin && (
+          <div className="lg:col-span-3">
+            <AddProductForm />
+          </div>
+        )}
       </div>
     </div>
   );

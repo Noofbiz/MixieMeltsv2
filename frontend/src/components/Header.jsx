@@ -64,7 +64,10 @@ const Header = ({ setPage }) => {
                 My Account
               </a>
               <button
-                onClick={logout}
+                onClick={() => {
+                  logout();
+                  setPage("home");
+                }}
                 className="px-4 py-2 text-sm text-terracotta-600 border border-terracotta-600 rounded-full hover:bg-terracotta-600 hover:text-cream-100 transition-colors"
               >
                 Logout

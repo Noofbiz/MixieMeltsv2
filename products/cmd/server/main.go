@@ -45,6 +45,9 @@ func main() {
 	r.Get("/products", h.GetProducts)
 	r.Post("/products", h.CreateProduct)
 
+	r.Get("/products/subscription-boxes", h.GetSubscriptionBoxes)
+	r.Post("/products/subscription-boxes", h.CreateSubscriptionBox)
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {

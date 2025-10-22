@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"com.MixieMelts.products/internal/models"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,6 +29,10 @@ func New(config string) (*DB, error) {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
+	if err := dbWrapper.createSubscriptionTables(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to create subscription tables: %w", err)
+	}
+
 	dbWrapper.Seed(context.Background())
 
 	return dbWrapper, nil
@@ -44,6 +49,25 @@ func (db *DB) createTables(ctx context.Context) error {
 		subscription BOOLEAN DEFAULT false,
 		image VARCHAR(255) NOT NULL,
 		description TEXT NOT NULL,
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	_, err := db.Exec(ctx, query)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) createSubscriptionTables(ctx context.Context) error {
+	query := `
+	CREATE TABLE IF NOT EXISTS subscription_boxes (
+		id SERIAL PRIMARY KEY,
+		name VARCHAR(255) NOT NULL,
+		description TEXT NOT NULL,
+		price NUMERIC(10, 2) NOT NULL,
+		image VARCHAR(255) NOT NULL,
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	);
@@ -89,4 +113,43 @@ func (db *DB) CreateProduct(ctx context.Context, product *models.Product) (int64
 		return 0, fmt.Errorf("failed to create product: %w", err)
 	}
 	return productID, nil
+}
+
+func (db *DB) GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.SubscriptionBox, error) {
+	query := "SELECT id, name, description, price, image, created_at, updated_at FROM subscription_boxes"
+	if limit > 0 {
+		query = fmt.Sprintf("%s LIMIT %d", query, limit)
+	}
+	rows, err := db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscription boxes: %w", err)
+	}
+	defer rows.Close()
+
+	var subscriptionBoxes []models.SubscriptionBox
+	for rows.Next() {
+		var subscriptionBox models.SubscriptionBox
+		if err := rows.Scan(&subscriptionBox.ID, &subscriptionBox.Name, &subscriptionBox.Description, &subscriptionBox.Price, &subscriptionBox.Image, &subscriptionBox.CreatedAt, &subscriptionBox.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan subscription box: %w", err)
+		}
+		subscriptionBoxes = append(subscriptionBoxes, subscriptionBox)
+	}
+	spew.Dump(subscriptionBoxes)
+	return subscriptionBoxes, nil
+}
+
+// CreateSubscriptionBox inserts a new subscription box into the database.
+func (db *DB) CreateSubscriptionBox(ctx context.Context, subscriptionBox *models.SubscriptionBox) (int64, error) {
+	query := `
+	INSERT INTO subscription_boxes (name, description, price, image)
+	VALUES ($1, $2, $3)
+	RETURNING id;
+	`
+	var subscriptionBoxID int64
+	err := db.QueryRow(ctx, query, subscriptionBox.Name, subscriptionBox.Price, subscriptionBox.Description, subscriptionBox.Image).Scan(&subscriptionBoxID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create subscription box: %w", err)
+	}
+
+	return subscriptionBoxID, nil
 }

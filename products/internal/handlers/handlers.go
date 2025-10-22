@@ -59,6 +59,46 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusCreated, product)
 }
 
+// GetSubscriptionBoxes handles GET requests to /subscription-boxes.
+func (h *Handler) GetSubscriptionBoxes(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 0
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid limit parameter")
+			return
+		}
+	}
+
+	subscriptionBoxes, err := h.db.GetSubscriptionBoxes(r.Context(), limit)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to get subscription boxes")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, subscriptionBoxes)
+}
+
+// CreateSubscriptionBox handles POST requests to /subscription-boxes.
+func (h *Handler) CreateSubscriptionBox(w http.ResponseWriter, r *http.Request) {
+	var subscriptionBox models.SubscriptionBox
+	if err := json.NewDecoder(r.Body).Decode(&subscriptionBox); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	subscriptionBoxID, err := h.db.CreateSubscriptionBox(r.Context(), &subscriptionBox)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create subscription box")
+		return
+	}
+
+	subscriptionBox.ID = subscriptionBoxID
+
+	respondWithJSON(w, http.StatusCreated, subscriptionBox)
+}
+
 func respondWithError(w http.ResponseWriter, code int, message string) {
 	respondWithJSON(w, code, map[string]string{"message": message})
 }

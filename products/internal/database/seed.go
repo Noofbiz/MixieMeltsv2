@@ -7,7 +7,7 @@ import (
 	"com.MixieMelts.products/internal/models"
 )
 
-func (db *DB) Seed(ctx context.Context) {
+func (db *DB) seedProductsTable(ctx context.Context) {
 	// Check if there are any products in the database
 	count, err := db.getProductsCount(ctx)
 	if err != nil {
@@ -16,11 +16,9 @@ func (db *DB) Seed(ctx context.Context) {
 	}
 
 	if count > 0 {
-		log.Println("Database already seeded.")
+		log.Println("Products database already seeded.")
 		return
 	}
-
-	log.Println("Seeding database...")
 
 	// Create some sample products
 	products := []models.Product{
@@ -57,13 +55,72 @@ func (db *DB) Seed(ctx context.Context) {
 			log.Printf("failed to create product %s: %v", product.Name, err)
 		}
 	}
+}
 
+func (db *DB) seedSubscriptionBoxTable(ctx context.Context) {
+	// Check if there are any subscription boxes in the database
+	count, err := db.getSubscriptionBoxesCount(ctx)
+	if err != nil {
+		log.Printf("failed to get subscription boxes count: %v", err)
+		return
+	}
+
+	if count > 0 {
+		log.Println("Subscription boxes database already seeded.")
+		return
+	}
+
+	subscriptionBoxes := []models.Product{
+		{
+			Name:        "Seasonal Scent Box",
+			Description: "A curated box of three 4oz melts, delivered quarterly. Each box features scents perfectly matched to the current season, allowing you to effortlessly transition your home's ambiance throughout the year.",
+			Price:       19.99,
+			Image:       "https://placehold.co/400x400/d1d5db/1f2937?text=Seasonal+Scent+Box",
+		},
+		{
+			Name:        "Mixie's Monthly Meltness",
+			Description: "A monthly subscription box featuring two 4oz melts. One is a beloved scent from our permanent collection, and the other is a limited-edition, subscriber-exclusive scent you won't find anywhere else.",
+			Price:       14.99,
+			Image:       "https://placehold.co/400x400/e5e7eb/111827?text=Mixie's+Monthly+Meltness",
+		},
+	}
+
+	for _, box := range subscriptionBoxes {
+		query := `
+		INSERT INTO subscription_boxes (name, description, price, image)
+		VALUES ($1, $2, $3, $4);
+		`
+		_, err := db.Exec(ctx, query, box.Name, box.Description, box.Price, box.Image)
+		if err != nil {
+			log.Printf("failed to create subscription box %s: %v", box.Name, err)
+		}
+	}
+}
+
+func (db *DB) Seed(ctx context.Context) {
+	log.Println("Seeding products table...")
+	db.seedProductsTable(ctx)
+	log.Println("Products table seeded successfully.")
+
+	log.Println("Seeding subscription boxes table...")
+	db.seedSubscriptionBoxTable(ctx)
+	log.Println("Subscription boxes table seeded successfully.")
 	log.Println("Database seeded successfully.")
 }
 
 func (db *DB) getProductsCount(ctx context.Context) (int, error) {
 	var count int
 	query := "SELECT COUNT(*) FROM products"
+	err := db.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (db *DB) getSubscriptionBoxesCount(ctx context.Context) (int, error) {
+	var count int
+	query := "SELECT COUNT(*) FROM subscription_boxes"
 	err := db.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
 		return 0, err

@@ -13,15 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// DBLayer defines the interface for database operations. This would be used
-// in a refactored Handler to allow for dependency injection.
-type DBLayer interface {
-	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
-	CreateUser(ctx context.Context, user *models.User) (int64, error)
-	GetUserByID(ctx context.Context, id int64) (*models.User, error)
-}
-
-// MockDB is a mock implementation of DBLayer for testing.
+// MockDB is a mock implementation of the DBLayer defined in handlers.go.
 type MockDB struct {
 	GetUserByEmailFunc func(ctx context.Context, email string) (*models.User, error)
 	CreateUserFunc     func(ctx context.Context, user *models.User) (int64, error)
@@ -49,143 +41,191 @@ func (m *MockDB) GetUserByID(ctx context.Context, id int64) (*models.User, error
 	return nil, errors.New("GetUserByIDFunc not implemented")
 }
 
+// Table-driven tests for RegisterUser
 func TestRegisterUser(t *testing.T) {
-	// A dummy JWT secret key for testing purposes.
 	jwtSecret := []byte("test-secret")
 
-	t.Run("successful registration", func(t *testing.T) {
-		mockDB := &MockDB{
-			GetUserByEmailFunc: func(ctx context.Context, email string) (*models.User, error) {
-				// Simulate user not found
-				return nil, errors.New("user not found")
-			},
-			CreateUserFunc: func(ctx context.Context, user *models.User) (int64, error) {
-				// Simulate successful user creation
-				return 1, nil
-			},
-		}
+	tests := []struct {
+		name      string
+		existing  bool
+		createErr error
+		wantCode  int
+	}{
+		{name: "successful registration", existing: false, createErr: nil, wantCode: http.StatusCreated},
+		{name: "user already exists", existing: true, createErr: nil, wantCode: http.StatusConflict},
+		{name: "db error on create", existing: false, createErr: errors.New("db fail"), wantCode: http.StatusInternalServerError},
+	}
 
-		// This test requires refactoring New() and Handler to accept the DBLayer interface.
-		// handler := New(mockDB, jwtSecret)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mockDB := &MockDB{
+				GetUserByEmailFunc: func(ctx context.Context, email string) (*models.User, error) {
+					if tc.existing {
+						return &models.User{ID: 2, Email: email}, nil
+					}
+					return nil, errors.New("not found")
+				},
+				CreateUserFunc: func(ctx context.Context, user *models.User) (int64, error) {
+					if tc.createErr != nil {
+						return 0, tc.createErr
+					}
+					return 1, nil
+				},
+			}
 
-		creds := models.Credentials{Email: "test@example.com", Password: "password123"}
-		body, _ := json.Marshal(creds)
-		req, err := http.NewRequest("POST", "/register", bytes.NewBuffer(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+			handler := New(mockDB, jwtSecret)
 
-		rr := httptest.NewRecorder()
-		// handler.RegisterUser(rr, req)
+			creds := models.Credentials{Email: "test@example.com", Password: "password123"}
+			body, _ := json.Marshal(creds)
+			req, err := http.NewRequest("POST", "/api/users/register", bytes.NewBuffer(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 
-		// Expected assertions:
-		// if status := rr.Code; status != http.StatusCreated {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
-		// }
-		//
-		// var user models.User
-		// json.Unmarshal(rr.Body.Bytes(), &user)
-		// if user.Email != creds.Email {
-		// 	t.Errorf("handler returned unexpected body: got email %v want %v", user.Email, creds.Email)
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
-	})
+			rr := httptest.NewRecorder()
+			handler.RegisterUser(rr, req)
 
-	t.Run("user already exists", func(t *testing.T) {
-		mockDB := &MockDB{
-			GetUserByEmailFunc: func(ctx context.Context, email string) (*models.User, error) {
-				// Simulate user found
-				return &models.User{ID: 1, Email: "test@example.com"}, nil
-			},
-		}
+			if rr.Code != tc.wantCode {
+				t.Fatalf("[%s] expected status %d got %d; body: %s", tc.name, tc.wantCode, rr.Code, rr.Body.String())
+			}
 
-		// handler := New(mockDB, jwtSecret)
-
-		creds := models.Credentials{Email: "test@example.com", Password: "password123"}
-		body, _ := json.Marshal(creds)
-		req, err := http.NewRequest("POST", "/register", bytes.NewBuffer(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		rr := httptest.NewRecorder()
-		// handler.RegisterUser(rr, req)
-
-		// Expected assertions:
-		// if status := rr.Code; status != http.StatusConflict {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusConflict)
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
-	})
+			if tc.wantCode == http.StatusCreated {
+				var created models.User
+				if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
+					t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+				}
+				if created.Email != creds.Email {
+					t.Fatalf("[%s] expected email %q got %q", tc.name, creds.Email, created.Email)
+				}
+				if created.ID != 1 {
+					t.Fatalf("[%s] expected id %d got %d", tc.name, 1, created.ID)
+				}
+			}
+		})
+	}
 }
 
+// Table-driven tests for LoginUser
 func TestLoginUser(t *testing.T) {
 	jwtSecret := []byte("test-secret")
 	password := "password123"
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
-	t.Run("successful login", func(t *testing.T) {
-		mockDB := &MockDB{
-			GetUserByEmailFunc: func(ctx context.Context, email string) (*models.User, error) {
-				return &models.User{
-					ID:       1,
-					Email:    "test@example.com",
-					Password: string(hashedPassword),
-				}, nil
-			},
-		}
+	tests := []struct {
+		name           string
+		userPresent    bool
+		passwordHash   []byte // hash to return as stored password
+		credPassword   string
+		wantStatusCode int
+	}{
+		{name: "successful login", userPresent: true, passwordHash: hashedPassword, credPassword: password, wantStatusCode: http.StatusOK},
+		{name: "invalid credentials", userPresent: true, passwordHash: func() []byte { h, _ := bcrypt.GenerateFromPassword([]byte("otherpass"), bcrypt.DefaultCost); return h }(), credPassword: "wrongpassword", wantStatusCode: http.StatusUnauthorized},
+		{name: "user not found", userPresent: false, passwordHash: nil, credPassword: "irrelevant", wantStatusCode: http.StatusUnauthorized},
+	}
 
-		// handler := New(mockDB, jwtSecret)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mockDB := &MockDB{
+				GetUserByEmailFunc: func(ctx context.Context, email string) (*models.User, error) {
+					if !tc.userPresent {
+						return nil, errors.New("not found")
+					}
+					return &models.User{
+						ID:       1,
+						Email:    "test@example.com",
+						Password: string(tc.passwordHash),
+						IsAdmin:  false,
+					}, nil
+				},
+			}
 
-		creds := models.Credentials{Email: "test@example.com", Password: password}
-		body, _ := json.Marshal(creds)
-		req, err := http.NewRequest("POST", "/login", bytes.NewBuffer(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+			handler := New(mockDB, jwtSecret)
 
-		rr := httptest.NewRecorder()
-		// handler.LoginUser(rr, req)
+			creds := models.Credentials{Email: "test@example.com", Password: tc.credPassword}
+			body, _ := json.Marshal(creds)
+			req, err := http.NewRequest("POST", "/api/users/login", bytes.NewBuffer(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 
-		// Expected assertions:
-		// if status := rr.Code; status != http.StatusOK {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
-		// }
-		//
-		// var resp map[string]string
-		// json.Unmarshal(rr.Body.Bytes(), &resp)
-		// if _, ok := resp["token"]; !ok {
-		// 	t.Error("handler did not return a token")
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
-	})
+			rr := httptest.NewRecorder()
+			handler.LoginUser(rr, req)
 
-	t.Run("invalid credentials", func(t *testing.T) {
-		mockDB := &MockDB{
-			GetUserByEmailFunc: func(ctx context.Context, email string) (*models.User, error) {
-				return &models.User{
-					ID:       1,
-					Email:    "test@example.com",
-					Password: string(hashedPassword),
-				}, nil
-			},
-		}
-		// handler := New(mockDB, jwtSecret)
+			if rr.Code != tc.wantStatusCode {
+				t.Fatalf("[%s] expected status %d got %d; body: %s", tc.name, tc.wantStatusCode, rr.Code, rr.Body.String())
+			}
 
-		creds := models.Credentials{Email: "test@example.com", Password: "wrongpassword"}
-		body, _ := json.Marshal(creds)
-		req, err := http.NewRequest("POST", "/login", bytes.NewBuffer(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+			if tc.wantStatusCode == http.StatusOK {
+				var resp map[string]string
+				if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+					t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+				}
+				if _, ok := resp["token"]; !ok {
+					t.Fatalf("[%s] expected token in response, got: %v", tc.name, resp)
+				}
+			}
+		})
+	}
+}
 
-		rr := httptest.NewRecorder()
-		// handler.LoginUser(rr, req)
+// Table-driven tests for GetUserProfile
+func TestGetUserProfile(t *testing.T) {
+	jwtSecret := []byte("test-secret")
 
-		// Expected assertions:
-		// if status := rr.Code; status != http.StatusUnauthorized {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusUnauthorized)
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
-	})
+	tests := []struct {
+		name        string
+		userID      string
+		mockUser    *models.User
+		mockErr     error
+		wantCode    int
+		expectEmail string
+	}{
+		{name: "success", userID: "42", mockUser: &models.User{ID: 42, Email: "profile@example.com", IsAdmin: false}, mockErr: nil, wantCode: http.StatusOK, expectEmail: "profile@example.com"},
+		{name: "user not found", userID: "99", mockUser: nil, mockErr: errors.New("not found"), wantCode: http.StatusNotFound, expectEmail: ""},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mockDB := &MockDB{
+				GetUserByIDFunc: func(ctx context.Context, id int64) (*models.User, error) {
+					if tc.mockErr != nil {
+						return nil, tc.mockErr
+					}
+					return tc.mockUser, nil
+				},
+			}
+
+			handler := New(mockDB, jwtSecret)
+
+			req, err := http.NewRequest("GET", "/api/users/me", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The GetUserProfile handler expects a string userID in the context.
+			ctx := context.WithValue(req.Context(), "userID", tc.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+			handler.GetUserProfile(rr, req)
+
+			if rr.Code != tc.wantCode {
+				t.Fatalf("[%s] expected status %d got %d; body: %s", tc.name, tc.wantCode, rr.Code, rr.Body.String())
+			}
+
+			if tc.wantCode == http.StatusOK {
+				var returned models.User
+				if err := json.NewDecoder(rr.Body).Decode(&returned); err != nil {
+					t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+				}
+				if returned.ID != tc.mockUser.ID || returned.Email != tc.mockUser.Email {
+					t.Fatalf("[%s] returned user mismatch: got %+v want %+v", tc.name, returned, tc.mockUser)
+				}
+			}
+		})
+	}
 }

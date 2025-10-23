@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"com.MixieMelts.users/internal/auth"
-	"com.MixieMelts.users/internal/database"
 	"com.MixieMelts.users/internal/models"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang-jwt/jwt/v4"
@@ -22,12 +21,18 @@ import (
 
 const oauthStateCookieName = "oauthstate"
 
+type DBLayer interface {
+	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
+	CreateUser(ctx context.Context, user *models.User) (int64, error)
+	GetUserByID(ctx context.Context, id int64) (*models.User, error)
+}
+
 type Handler struct {
-	db           *database.DB
+	db           DBLayer
 	jwtSecretKey []byte
 }
 
-func New(db *database.DB, jwtSecretKey []byte) *Handler {
+func New(db DBLayer, jwtSecretKey []byte) *Handler {
 	return &Handler{db: db, jwtSecretKey: jwtSecretKey}
 }
 

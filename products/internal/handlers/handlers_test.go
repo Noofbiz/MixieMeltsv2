@@ -9,34 +9,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"com.MixieMelts.products/internal/database"
 	"com.MixieMelts.products/internal/models"
 )
 
-// DBLayer defines the interface for database operations required by the handlers.
-// For these tests to run, the Handler struct and New function in the main `handlers.go`
-// file would need to be updated to use this interface instead of the concrete
-// `*database.DB` type. This allows for dependency injection of a mock database.
-//
-// Example refactoring in handlers.go:
-//
-//	type Handler struct {
-//	    db DBLayer // <-- Use the interface
-//	}
-//
-// func New(db DBLayer) *Handler { // <-- Use the interface
-//
-//	    return &Handler{db: db}
-//	}
-type DBLayer interface {
-	GetProducts(ctx context.Context, limit int) ([]models.Product, error)
-	CreateProduct(ctx context.Context, product *models.Product) (int, error)
-}
-
 // MockDB is a mock implementation of the DBLayer for testing purposes.
 type MockDB struct {
-	GetProductsFunc   func(ctx context.Context, limit int) ([]models.Product, error)
-	CreateProductFunc func(ctx context.Context, product *models.Product) (int, error)
+	GetProductsFunc           func(ctx context.Context, limit int) ([]models.Product, error)
+	CreateProductFunc         func(ctx context.Context, product *models.Product) (int64, error)
+	GetSubscriptionBoxesFunc  func(ctx context.Context, limit int) ([]models.SubscriptionBox, error)
+	CreateSubscriptionBoxFunc func(ctx context.Context, box *models.SubscriptionBox) (int64, error)
 }
 
 func (m *MockDB) GetProducts(ctx context.Context, limit int) ([]models.Product, error) {
@@ -46,126 +27,318 @@ func (m *MockDB) GetProducts(ctx context.Context, limit int) ([]models.Product, 
 	return nil, errors.New("GetProductsFunc not implemented")
 }
 
-func (m *MockDB) CreateProduct(ctx context.Context, product *models.Product) (int, error) {
+func (m *MockDB) CreateProduct(ctx context.Context, product *models.Product) (int64, error) {
 	if m.CreateProductFunc != nil {
 		return m.CreateProductFunc(ctx, product)
 	}
 	return 0, errors.New("CreateProductFunc not implemented")
 }
 
+func (m *MockDB) GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.SubscriptionBox, error) {
+	if m.GetSubscriptionBoxesFunc != nil {
+		return m.GetSubscriptionBoxesFunc(ctx, limit)
+	}
+	return nil, errors.New("GetSubscriptionBoxesFunc not implemented")
+}
+
+func (m *MockDB) CreateSubscriptionBox(ctx context.Context, box *models.SubscriptionBox) (int64, error) {
+	if m.CreateSubscriptionBoxFunc != nil {
+		return m.CreateSubscriptionBoxFunc(ctx, box)
+	}
+	return 0, errors.New("CreateSubscriptionBoxFunc not implemented")
+}
+
+// Table-driven tests for GetProducts
 func TestGetProducts(t *testing.T) {
-	mockProducts := []models.Product{
+	baseProducts := []models.Product{
 		{ID: 1, Name: "Vanilla Wax Melts", Price: 10.99},
 		{ID: 2, Name: "Lavender Candle", Price: 15.99},
 	}
 
-	mockDB := &MockDB{
-		GetProductsFunc: func(ctx context.Context, limit int) ([]models.Product, error) {
-			return mockProducts, nil
+	tests := []struct {
+		name         string
+		limitQuery   string
+		mockResponse []models.Product
+		mockError    error
+		wantStatus   int
+		wantCount    int
+	}{
+		{
+			name:         "ok no limit",
+			limitQuery:   "",
+			mockResponse: baseProducts,
+			mockError:    nil,
+			wantStatus:   http.StatusOK,
+			wantCount:    len(baseProducts),
+		},
+		{
+			name:         "ok with limit",
+			limitQuery:   "?limit=1",
+			mockResponse: baseProducts[:1],
+			mockError:    nil,
+			wantStatus:   http.StatusOK,
+			wantCount:    1,
+		},
+		{
+			name:         "database error",
+			limitQuery:   "",
+			mockResponse: nil,
+			mockError:    errors.New("db failure"),
+			wantStatus:   http.StatusInternalServerError,
+			wantCount:    0,
 		},
 	}
 
-	// NOTE: Assumes `New` accepts our DBLayer interface.
-	// handler := New(mockDB)
-	// Since we cannot change the original code, we construct the handler manually for the test.
-	// This will cause a type error, as `mockDB` is not a `*database.DB`.
-	// The code below is how it *should* be written if the main code used an interface.
-	// handler := &Handler{db: mockDB}
+	for _, tc := range tests {
+		tc := tc // capture
+		t.Run(tc.name, func(t *testing.T) {
+			mockDB := &MockDB{
+				GetProductsFunc: func(ctx context.Context, limit int) ([]models.Product, error) {
+					if tc.mockError != nil {
+						return nil, tc.mockError
+					}
+					return tc.mockResponse, nil
+				},
+			}
 
-	// To proceed, we will assume for the sake of demonstration that the handler can be created
-	// with a nil database, and we'll test the logic without a functional DB dependency.
-	// A proper test requires the refactoring mentioned above.
-	t.Run("successful retrieval", func(t *testing.T) {
-		handler := &Handler{db: (*database.DB)(nil)} // This will not work in a real scenario
-		// The test is therefore illustrative of the structure and assertions.
+			handler := New(mockDB)
 
-		req, err := http.NewRequest("GET", "/products", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+			req, err := http.NewRequest("GET", "/products"+tc.limitQuery, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		rr := httptest.NewRecorder()
-		// To test the logic, we'd call the handler, but this will fail.
-		// handler.GetProducts(rr, req)
+			rr := httptest.NewRecorder()
+			handler.GetProducts(rr, req)
 
-		// Expected assertions:
-		// if rr.Code != http.StatusOK {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, http.StatusOK)
-		// }
-		//
-		// var returnedProducts []models.Product
-		// if err := json.NewDecoder(rr.Body).Decode(&returnedProducts); err != nil {
-		// 	t.Fatalf("could not decode response: %v", err)
-		// }
-		//
-		// if len(returnedProducts) != len(mockProducts) {
-		// 	t.Errorf("expected %d products, got %d", len(mockProducts), len(returnedProducts))
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
-	})
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("[%s] unexpected status: got %d want %d; body: %s", tc.name, rr.Code, tc.wantStatus, rr.Body.String())
+			}
+
+			if tc.wantStatus == http.StatusOK {
+				var returned []models.Product
+				if err := json.NewDecoder(rr.Body).Decode(&returned); err != nil {
+					t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+				}
+				if len(returned) != tc.wantCount {
+					t.Fatalf("[%s] expected %d products, got %d", tc.name, tc.wantCount, len(returned))
+				}
+			}
+		})
+	}
 }
 
+// Table-driven tests for CreateProduct
 func TestCreateProduct(t *testing.T) {
-	newProduct := models.Product{Name: "New Product", Price: 20.00}
-	newProductID := 123
+	validProduct := models.Product{Name: "New Product", Price: 20.00}
+	createdID := int64(123)
 
-	mockDB := &MockDB{
-		CreateProductFunc: func(ctx context.Context, product *models.Product) (int, error) {
-			return newProductID, nil
+	tests := []struct {
+		name          string
+		payload       []byte
+		mockCreateID  int64
+		mockCreateErr error
+		wantStatus    int
+		wantCreatedID int64
+	}{
+		{
+			name:          "successful creation",
+			payload:       func() []byte { b, _ := json.Marshal(validProduct); return b }(),
+			mockCreateID:  createdID,
+			mockCreateErr: nil,
+			wantStatus:    http.StatusCreated,
+			wantCreatedID: createdID,
+		},
+		{
+			name:          "invalid body",
+			payload:       []byte("{invalid-json"),
+			mockCreateID:  0,
+			mockCreateErr: nil,
+			wantStatus:    http.StatusBadRequest,
+			wantCreatedID: 0,
+		},
+		{
+			name:          "database error on creation",
+			payload:       func() []byte { b, _ := json.Marshal(validProduct); return b }(),
+			mockCreateID:  0,
+			mockCreateErr: errors.New("db error"),
+			wantStatus:    http.StatusInternalServerError,
+			wantCreatedID: 0,
 		},
 	}
 
-	// As with the above test, this demonstrates the intended structure.
-	// handler := New(mockDB)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mockDB := &MockDB{
+				CreateProductFunc: func(ctx context.Context, product *models.Product) (int64, error) {
+					if tc.mockCreateErr != nil {
+						return 0, tc.mockCreateErr
+					}
+					// basic validation to ensure payload was parsed
+					if product.Name == "" {
+						return 0, errors.New("invalid product")
+					}
+					return tc.mockCreateID, nil
+				},
+			}
 
-	t.Run("successful creation", func(t *testing.T) {
-		productJSON, _ := json.Marshal(newProduct)
-		req, err := http.NewRequest("POST", "/products", bytes.NewBuffer(productJSON))
-		if err != nil {
-			t.Fatal(err)
+			handler := New(mockDB)
+
+			req, err := http.NewRequest("POST", "/products", bytes.NewBuffer(tc.payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler.CreateProduct(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("[%s] unexpected status: got %d want %d; body: %s", tc.name, rr.Code, tc.wantStatus, rr.Body.String())
+			}
+
+			if tc.wantStatus == http.StatusCreated {
+				var created models.Product
+				if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
+					t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+				}
+				if created.ID != tc.wantCreatedID {
+					t.Fatalf("[%s] expected created ID %d got %d", tc.name, tc.wantCreatedID, created.ID)
+				}
+			}
+		})
+	}
+}
+
+// Table-driven tests for subscription boxes
+func TestSubscriptionBoxes(t *testing.T) {
+	baseBoxes := []models.SubscriptionBox{
+		{ID: 1, Name: "Monthly Surprise", Description: "curated", Price: 29.99},
+		{ID: 2, Name: "Seasonal Box", Description: "seasonal", Price: 25.00},
+	}
+
+	t.Run("GetSubscriptionBoxes", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			query      string
+			mockResp   []models.SubscriptionBox
+			mockErr    error
+			wantStatus int
+			wantCount  int
+		}{
+			{name: "ok no limit", query: "", mockResp: baseBoxes, mockErr: nil, wantStatus: http.StatusOK, wantCount: len(baseBoxes)},
+			{name: "ok with limit", query: "?limit=1", mockResp: baseBoxes[:1], mockErr: nil, wantStatus: http.StatusOK, wantCount: 1},
+			{name: "db error", query: "", mockResp: nil, mockErr: errors.New("db fail"), wantStatus: http.StatusInternalServerError, wantCount: 0},
 		}
-		req.Header.Set("Content-Type", "application/json")
 
-		rr := httptest.NewRecorder()
-		// handler.CreateProduct(rr, req)
+		for _, tc := range tests {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				mockDB := &MockDB{
+					GetSubscriptionBoxesFunc: func(ctx context.Context, limit int) ([]models.SubscriptionBox, error) {
+						if tc.mockErr != nil {
+							return nil, tc.mockErr
+						}
+						return tc.mockResp, nil
+					},
+				}
 
-		// Expected assertions:
-		// if rr.Code != http.StatusCreated {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, http.StatusCreated)
-		// }
-		//
-		// var createdProduct models.Product
-		// if err := json.NewDecoder(rr.Body).Decode(&createdProduct); err != nil {
-		// 	t.Fatalf("could not decode response: %v", err)
-		// }
-		//
-		// if createdProduct.ID != newProductID {
-		// 	t.Errorf("expected product ID to be %d, got %d", newProductID, createdProduct.ID)
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
+				handler := New(mockDB)
+				req, _ := http.NewRequest("GET", "/products/subscription-boxes"+tc.query, nil)
+				rr := httptest.NewRecorder()
+				handler.GetSubscriptionBoxes(rr, req)
+
+				if rr.Code != tc.wantStatus {
+					t.Fatalf("[%s] unexpected status: got %d want %d; body: %s", tc.name, rr.Code, tc.wantStatus, rr.Body.String())
+				}
+
+				if tc.wantStatus == http.StatusOK {
+					var boxes []models.SubscriptionBox
+					if err := json.NewDecoder(rr.Body).Decode(&boxes); err != nil {
+						t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+					}
+					if len(boxes) != tc.wantCount {
+						t.Fatalf("[%s] expected %d boxes got %d", tc.name, tc.wantCount, len(boxes))
+					}
+				}
+			})
+		}
 	})
 
-	t.Run("database error on creation", func(t *testing.T) {
-		errorMockDB := &MockDB{
-			CreateProductFunc: func(ctx context.Context, product *models.Product) (int, error) {
-				return 0, errors.New("database failure")
+	t.Run("CreateSubscriptionBox", func(t *testing.T) {
+		validBox := models.SubscriptionBox{Name: "Monthly Surprise", Description: "curated", Price: 29.99}
+		createdID := int64(77)
+
+		tests := []struct {
+			name    string
+			payload []byte
+			mockID  int64
+			mockErr error
+			want    int
+			wantID  int64
+		}{
+			{
+				name:    "successful create",
+				payload: func() []byte { b, _ := json.Marshal(validBox); return b }(),
+				mockID:  createdID,
+				mockErr: nil,
+				want:    http.StatusCreated,
+				wantID:  createdID,
+			},
+			{
+				name:    "invalid body",
+				payload: []byte("{invalid-json"),
+				mockID:  0,
+				mockErr: nil,
+				want:    http.StatusBadRequest,
+				wantID:  0,
+			},
+			{
+				name:    "db error",
+				payload: func() []byte { b, _ := json.Marshal(validBox); return b }(),
+				mockID:  0,
+				mockErr: errors.New("db error"),
+				want:    http.StatusInternalServerError,
+				wantID:  0,
 			},
 		}
-		// handler := New(errorMockDB)
 
-		productJSON, _ := json.Marshal(newProduct)
-		req, err := http.NewRequest("POST", "/products", bytes.NewBuffer(productJSON))
-		if err != nil {
-			t.Fatal(err)
+		for _, tc := range tests {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				mockDB := &MockDB{
+					CreateSubscriptionBoxFunc: func(ctx context.Context, box *models.SubscriptionBox) (int64, error) {
+						if tc.mockErr != nil {
+							return 0, tc.mockErr
+						}
+						if box.Name == "" {
+							return 0, errors.New("invalid")
+						}
+						return tc.mockID, nil
+					},
+				}
+
+				handler := New(mockDB)
+				req, _ := http.NewRequest("POST", "/products/subscription-boxes", bytes.NewBuffer(tc.payload))
+				req.Header.Set("Content-Type", "application/json")
+				rr := httptest.NewRecorder()
+				handler.CreateSubscriptionBox(rr, req)
+
+				if rr.Code != tc.want {
+					t.Fatalf("[%s] unexpected status: got %d want %d; body: %s", tc.name, rr.Code, tc.want, rr.Body.String())
+				}
+
+				if tc.want == http.StatusCreated {
+					var created models.SubscriptionBox
+					if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
+						t.Fatalf("[%s] failed to decode response: %v", tc.name, err)
+					}
+					if created.ID != tc.wantID {
+						t.Fatalf("[%s] expected created id %d got %d", tc.name, tc.wantID, created.ID)
+					}
+				}
+			})
 		}
-
-		rr := httptest.NewRecorder()
-		// handler.CreateProduct(rr, req)
-
-		// Expected assertions:
-		// if rr.Code != http.StatusInternalServerError {
-		// 	t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, http.StatusInternalServerError)
-		// }
-		t.Skip("Skipping test: requires refactoring handlers.go to use an interface for mocking the database.")
 	})
 }

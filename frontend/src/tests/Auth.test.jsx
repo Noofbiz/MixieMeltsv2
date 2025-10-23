@@ -23,7 +23,8 @@ const localStorageMock = (() => {
     }),
   };
 })();
-Object.defineProperty(window, "localStorage", { value: localStorageMock });
+
+vi.stubGlobal("localStorage", localStorageMock);
 
 const mockUser = { id: 1, email: "user@test.com", is_admin: false };
 const mockAdmin = { id: 2, email: "admin@test.com", is_admin: true };

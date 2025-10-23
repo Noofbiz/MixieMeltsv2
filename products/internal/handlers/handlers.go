@@ -1,21 +1,28 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
-	"com.MixieMelts.products/internal/database"
 	"com.MixieMelts.products/internal/models"
 )
 
 // Handler represents the HTTP handlers for the service.
+type DBLayer interface {
+	GetProducts(ctx context.Context, limit int) ([]models.Product, error)
+	CreateProduct(ctx context.Context, product *models.Product) (int64, error)
+	GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.SubscriptionBox, error)
+	CreateSubscriptionBox(ctx context.Context, box *models.SubscriptionBox) (int64, error)
+}
+
 type Handler struct {
-	db *database.DB
+	db DBLayer
 }
 
 // New creates a new handler.
-func New(db *database.DB) *Handler {
+func New(db DBLayer) *Handler {
 	return &Handler{db: db}
 }
 

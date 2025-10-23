@@ -2,27 +2,27 @@ name: Users CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - 'users/**'
+      - "users/**"
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
-      - 'users/**'
+      - "users/**"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.2"
 
-    - name: Build
-      run: cd users && go build -v ./...
+      - name: Build
+        run: cd users && go build -v ./...
 
-    - name: Test
-      run: cd users && go test -v ./...
+      - name: Test
+        run: cd users && go test -v ./...

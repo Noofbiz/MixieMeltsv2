@@ -29,34 +29,68 @@ vi.stubGlobal("localStorage", localStorageMock);
 const mockUser = { id: 1, email: "user@test.com", is_admin: false };
 const mockAdmin = { id: 2, email: "admin@test.com", is_admin: true };
 
+// Helper: extract Authorization header value from fetch options (supports Headers instance or plain object)
+const getAuthHeader = (opts) => {
+  if (!opts || !opts.headers) return null;
+  const h = opts.headers;
+  if (typeof h.get === "function") {
+    // Headers instance
+    return h.get("Authorization") || h.get("authorization") || null;
+  }
+  // Plain object style
+  return h.Authorization || h.authorization || null;
+};
+
+// Helper: detect product endpoints quickly
+const getUrlString = (url) => (typeof url === "string" ? url : url.url);
+
 describe("Authentication and Authorization", () => {
   const renderComponent = () => render(<AppWrapper />);
 
   beforeEach(() => {
-    fetch.mockClear();
+    // Reset the fetch mock implementation and any queued responses so tests don't leak state
+    // between each other. Also clear localStorage.
+    fetch.mockReset();
     localStorage.clear();
   });
 
   it("should allow a user to log in and see account details", async () => {
-    fetch.mockImplementation((url) => {
-      if (url.startsWith("/products")) {
+    fetch.mockImplementation((url, opts) => {
+      // Products endpoints return empty lists in tests
+      if (typeof url === "string" && url.startsWith("/products")) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve([]),
         });
       }
+
+      // Login endpoint behavior for this test (successful login)
       if (url === "/api/users/login") {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ token: "fake-token" }),
         });
       }
+
+      // User profile endpoint: inspect Authorization header to decide which user to return
       if (url === "/api/users/me") {
+        const authHeader = getAuthHeader(opts);
+        if (
+          authHeader &&
+          typeof authHeader === "string" &&
+          authHeader.includes("admin-token")
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockAdmin),
+          });
+        }
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve(mockUser),
         });
       }
+
       return Promise.reject(new Error(`unhandled fetch request for ${url}`));
     });
 
@@ -97,18 +131,37 @@ describe("Authentication and Authorization", () => {
   });
 
   it("should show an error on failed login", async () => {
-    fetch.mockImplementation((url) => {
-      if (url.startsWith("/products")) {
+    fetch.mockImplementation((url, opts) => {
+      if (typeof url === "string" && url.startsWith("/products")) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve([]),
         });
       }
       if (url === "/api/users/login") {
+        // Simulate failed login response for this test
         return Promise.resolve({
           ok: false,
           status: 401,
           json: () => Promise.resolve({ message: "Invalid credentials" }),
+        });
+      }
+      if (url === "/api/users/me") {
+        // In error scenario we don't expect to be called, but handle defensively
+        const authHeader = getAuthHeader(opts);
+        if (
+          authHeader &&
+          typeof authHeader === "string" &&
+          authHeader.includes("admin-token")
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockAdmin),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockUser),
         });
       }
       return Promise.reject(new Error(`unhandled fetch request for ${url}`));
@@ -145,8 +198,8 @@ describe("Authentication and Authorization", () => {
 
   it("should not show admin panel for a regular user (via UI login)", async () => {
     // Use UI login flow to authenticate as a regular user
-    fetch.mockImplementation((url) => {
-      if (url.startsWith("/products")) {
+    fetch.mockImplementation((url, opts) => {
+      if (typeof url === "string" && url.startsWith("/products")) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve([]),
@@ -159,6 +212,17 @@ describe("Authentication and Authorization", () => {
         });
       }
       if (url === "/api/users/me") {
+        const authHeader = getAuthHeader(opts);
+        if (
+          authHeader &&
+          typeof authHeader === "string" &&
+          authHeader.includes("admin-token")
+        ) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockAdmin),
+          });
+        }
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve(mockUser),
@@ -206,26 +270,25 @@ describe("Authentication and Authorization", () => {
 
   it("should show admin panel for an admin user (via UI login)", async () => {
     // Use UI login flow to authenticate as an admin user
+    // Return explicit responses for login and profile so the admin user is returned reliably.
     fetch.mockImplementation((url) => {
-      if (url.startsWith("/products")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve([]),
-        });
+      const urlStr = getUrlString(url);
+      if (urlStr.startsWith("/products")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
       }
-      if (url === "/api/users/login") {
+      if (urlStr === "/api/users/login") {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ token: "admin-token" }),
         });
       }
-      if (url === "/api/users/me") {
+      if (urlStr === "/api/users/me") {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve(mockAdmin),
         });
       }
-      return Promise.reject(new Error(`unhandled fetch request for ${url}`));
+      return Promise.reject(new Error(`unhandled fetch request for ${urlStr}`));
     });
 
     renderComponent();

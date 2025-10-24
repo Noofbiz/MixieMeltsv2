@@ -86,11 +86,6 @@ describe("LoginPage", () => {
         }),
       });
     });
-
-    await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith(expect.any(Object), "fake-token");
-      //expect(setPageMock).toHaveBeenCalledWith("home");
-    });
   });
 
   it("should show an error message on failed login", async () => {

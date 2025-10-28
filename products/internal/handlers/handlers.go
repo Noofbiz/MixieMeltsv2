@@ -7,12 +7,23 @@ import (
 	"strconv"
 
 	"com.MixieMelts.products/internal/models"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler represents the HTTP handlers for the service.
 type DBLayer interface {
+	// GetProducts returns multiple products (optionally limited).
 	GetProducts(ctx context.Context, limit int) ([]models.Product, error)
+
+	// GetProduct returns a single product by id including its recipe.
+	GetProduct(ctx context.Context, id int64) (*models.Product, error)
+
+	// CreateProduct inserts a product without guaranteeing transactional recipe inserts.
 	CreateProduct(ctx context.Context, product *models.Product) (int64, error)
+
+	// CreateProductTx inserts a product and its recipe atomically in a transaction.
+	CreateProductTx(ctx context.Context, product *models.Product) (int64, error)
+
 	GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.SubscriptionBox, error)
 	CreateSubscriptionBox(ctx context.Context, box *models.SubscriptionBox) (int64, error)
 }
@@ -47,7 +58,34 @@ func (h *Handler) GetProducts(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, products)
 }
 
+// GetProduct handles GET requests to /products/{id}.
+func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	if idStr == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing product id")
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid product id")
+		return
+	}
+
+	product, err := h.db.GetProduct(r.Context(), id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to get product")
+		return
+	}
+	if product == nil {
+		respondWithError(w, http.StatusNotFound, "Product not found")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, product)
+}
+
 // CreateProduct handles POST requests to /products.
+// This handler expects the database layer to provide a transactional create
+// that inserts the product and its recipe atomically.
 func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 	var product models.Product
 	if err := json.NewDecoder(r.Body).Decode(&product); err != nil {
@@ -55,7 +93,8 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	productID, err := h.db.CreateProduct(r.Context(), &product)
+	// Prefer transactional creation to ensure product + recipe are inserted atomically.
+	productID, err := h.db.CreateProductTx(r.Context(), &product)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create product")
 		return

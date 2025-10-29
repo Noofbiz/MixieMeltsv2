@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -13,7 +14,7 @@ import (
 // Handler represents the HTTP handlers for the service.
 type DBLayer interface {
 	// GetProducts returns multiple products (optionally limited).
-	GetProducts(ctx context.Context, limit int) ([]models.Product, error)
+	GetProducts(ctx context.Context, limit int, prodID int64) ([]models.Product, error)
 
 	// GetProduct returns a single product by id including its recipe.
 	GetProduct(ctx context.Context, id int64) (*models.Product, error)
@@ -49,12 +50,19 @@ func (h *Handler) GetProducts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	products, err := h.db.GetProducts(r.Context(), limit)
+	products, err := h.db.GetProducts(r.Context(), limit, 0)
 	if err != nil {
+		println(err.Error())
 		respondWithError(w, http.StatusInternalServerError, "Failed to get products")
 		return
 	}
+	// Ensure recipe is a non-nil slice for the frontend (avoid JSON `null`).
+	for i := range products {
+		if products[i].Recipe == nil {
+			products[i].Recipe = []models.Ingredient{}
+		}
+	}
+	log.Printf("handlers: returning %d products (limit=%d)", len(products), limit)
 	respondWithJSON(w, http.StatusOK, products)
 }
 
@@ -80,6 +88,11 @@ func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusNotFound, "Product not found")
 		return
 	}
+	// Ensure recipe is a non-nil slice to prevent JSON null in the frontend.
+	if product.Recipe == nil {
+		product.Recipe = []models.Ingredient{}
+	}
+	log.Printf("handlers: returning product id=%d with %d recipe items", product.ID, len(product.Recipe))
 	respondWithJSON(w, http.StatusOK, product)
 }
 

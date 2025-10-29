@@ -235,10 +235,10 @@ func (h *Handler) ComputeProductCapacity(ctx context.Context, productID int64) (
 				LimitingAvail:  0,
 			}, nil
 		}
-		if ri.Quantity <= 0 {
+		if ri.Amount <= 0 {
 			continue
 		}
-		possible := ing.Stock / ri.Quantity
+		possible := ing.Stock / ri.Amount
 		if possible < limitingUnits {
 			limitingUnits = possible
 			limitingItemID = ing.ID

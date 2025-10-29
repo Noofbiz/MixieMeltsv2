@@ -5,32 +5,32 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB is a thin wrapper around a pgx connection.
+// DB is a thin wrapper around a pgx connection pool.
 type DB struct {
-	*pgx.Conn
+	*pgxpool.Pool
 }
 
-// New creates a new database connection and ensures required tables exist.
+// New creates a new database connection pool and ensures required tables exist.
 func New(config string) (*DB, error) {
-	conn, err := pgx.Connect(context.Background(), config)
+	pool, err := pgxpool.New(context.Background(), config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
-	db := &DB{Conn: conn}
+	db := &DB{pool}
 
 	if err := db.createTables(context.Background()); err != nil {
-		_ = conn.Close(context.Background())
+		pool.Close()
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
 	// Optional seed or migrations could run here
 	db.seed(context.Background())
 
-	log.Println("inventory: successfully connected to database")
+	log.Println("inventory: successfully created database connection pool")
 	return db, nil
 }
 
@@ -51,5 +51,6 @@ func (db *DB) createTables(ctx context.Context) error {
 func (db *DB) seed(ctx context.Context) {
 	db.seedIngredients(ctx)
 	db.seedInventoryAdjustments(ctx)
+	// Seed recipe items (mirrors products' recipes). Enabled so inventory has recipe data for product lookups.
 	db.seedRecipeItems(ctx)
 }

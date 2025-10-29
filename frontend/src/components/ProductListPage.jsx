@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import ProductCard from "./ProductCard";
 
-const ProductListPage = () => {
+const ProductListPage = ({ goTo }) => {
   const [products, setProducts] = useState([]);
   const [subscriptionBoxes, setSubscriptionBoxes] = useState([]);
 
@@ -49,6 +49,7 @@ const ProductListPage = () => {
               image: box.image,
               isSubscription: true,
             }}
+            onOpen={(id) => goTo("product", id)}
           />
         ))}
       </div>
@@ -58,7 +59,11 @@ const ProductListPage = () => {
       </h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
         {products.map((product) => (
-          <ProductCard key={product.id} product={product} />
+          <ProductCard
+            key={product.id}
+            product={product}
+            onOpen={(id) => goTo("product", id)}
+          />
         ))}
       </div>
     </div>

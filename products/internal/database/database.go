@@ -6,30 +6,31 @@ import (
 	"log"
 
 	"com.MixieMelts.products/internal/models"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DB represents the database connection.
 type DB struct {
-	*pgx.Conn
+	*pgxpool.Pool
 }
 
 // New creates a new database connection.
 func New(config string) (*DB, error) {
-	conn, err := pgx.Connect(context.Background(), config)
+	pool, err := pgxpool.New(context.Background(), config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
-	log.Println("Successfully connected to the database.")
+	log.Println("Successfully created database connection pool.")
 
-	dbWrapper := &DB{conn}
+	dbWrapper := &DB{pool}
 	if err := dbWrapper.createTables(context.Background()); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
 	if err := dbWrapper.createSubscriptionTables(context.Background()); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("failed to create subscription tables: %w", err)
 	}
 
@@ -39,8 +40,8 @@ func New(config string) (*DB, error) {
 }
 
 func (db *DB) createTables(ctx context.Context) error {
-	// Create products table and recipe_items table (recipe items store the ingredient
-	// name/type/unit/amount for each product so the products service can return a recipe).
+	// Create products + recipe_items canonical schema if missing.
+	// Keep the CREATE statement minimal and idempotent.
 	query := `
 	CREATE TABLE IF NOT EXISTS products (
 		id SERIAL PRIMARY KEY,
@@ -54,23 +55,11 @@ func (db *DB) createTables(ctx context.Context) error {
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	);
-
-	CREATE TABLE IF NOT EXISTS recipe_items (
-		id SERIAL PRIMARY KEY,
-		product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-		name VARCHAR(255) NOT NULL,
-		type VARCHAR(255) NOT NULL,
-		unit VARCHAR(50) NOT NULL,
-		amount DOUBLE PRECISION NOT NULL,
-		notes TEXT,
-		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-	);
 	`
-	_, err := db.Exec(ctx, query)
-	if err != nil {
+	if _, err := db.Exec(ctx, query); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -91,10 +80,13 @@ func (db *DB) createSubscriptionTables(ctx context.Context) error {
 }
 
 // GetProducts retrieves all products from the database, including their recipe items.
-func (db *DB) GetProducts(ctx context.Context, limit int) ([]models.Product, error) {
+func (db *DB) GetProducts(ctx context.Context, limit int, prodID int64) ([]models.Product, error) {
 	query := "SELECT id, name, category, scent, price, subscription, image, description, created_at, updated_at FROM products"
 	if limit > 0 {
 		query = fmt.Sprintf("%s LIMIT %d", query, limit)
+	}
+	if prodID > 0 {
+		query = fmt.Sprintf("%s WHERE id = %d", query, prodID)
 	}
 	rows, err := db.Query(ctx, query)
 	if err != nil {
@@ -110,8 +102,9 @@ func (db *DB) GetProducts(ctx context.Context, limit int) ([]models.Product, err
 		}
 
 		// Load recipe items for this product
-		recipeQuery := `SELECT id, name, type, unit, amount, notes, created_at, updated_at FROM recipe_items WHERE product_id = $1 ORDER BY id`
+		recipeQuery := `SELECT ingredient_id, unit, amount, notes, created_at, updated_at FROM recipe_items WHERE product_id = $1 ORDER BY id`
 		rrows, err := db.Query(ctx, recipeQuery, product.ID)
+		defer rrows.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get recipe items for product %d: %w", product.ID, err)
 		}
@@ -119,14 +112,21 @@ func (db *DB) GetProducts(ctx context.Context, limit int) ([]models.Product, err
 		for rrows.Next() {
 			var ing models.Ingredient
 			var typ string
-			if err := rrows.Scan(&ing.ID, &ing.Name, &typ, &ing.Unit, &ing.Amount, &ing.Notes, &ing.CreatedAt, &ing.UpdatedAt); err != nil {
-				rrows.Close()
+			if err := rrows.Scan(&ing.ID, &ing.Unit, &ing.Amount, &ing.Notes, &ing.CreatedAt, &ing.UpdatedAt); err != nil {
 				return nil, fmt.Errorf("failed to scan recipe item for product %d: %w", product.ID, err)
+			}
+			ingredientQuery := `SELECT name, type FROM ingredients WHERE id = $1`
+			ingRow := db.QueryRow(ctx, ingredientQuery, ing.ID)
+			if err = ingRow.Scan(&ing.Name, &typ); err != nil {
+				return nil, fmt.Errorf("failed to scan ingredient name for ingredient %d: %w", ing.ID, err)
 			}
 			ing.Type = models.IngredientType(typ)
 			recipe = append(recipe, ing)
 		}
-		rrows.Close()
+		if len(recipe) == 0 {
+			// Ensure we return an empty array instead of null when marshalled to JSON.
+			recipe = []models.Ingredient{}
+		}
 		product.Recipe = recipe
 
 		products = append(products, product)
@@ -168,36 +168,8 @@ func (db *DB) CreateProduct(ctx context.Context, product *models.Product) (int64
 
 // GetProduct returns a single product by id including its recipe items.
 func (db *DB) GetProduct(ctx context.Context, id int64) (*models.Product, error) {
-	row := db.QueryRow(ctx, `SELECT id, name, category, scent, price, subscription, image, description, created_at, updated_at FROM products WHERE id = $1`, id)
-	var p models.Product
-	if err := row.Scan(&p.ID, &p.Name, &p.Category, &p.Scent, &p.Price, &p.Subscription, &p.Image, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("GetProduct scan: %w", err)
-	}
-
-	// Load recipe items for this product
-	rq := `SELECT id, name, type, unit, amount, notes, created_at, updated_at FROM recipe_items WHERE product_id = $1 ORDER BY id`
-	rrows, err := db.Query(ctx, rq, p.ID)
-	if err != nil {
-		return nil, fmt.Errorf("GetProduct recipe query: %w", err)
-	}
-	defer rrows.Close()
-
-	var recipe []models.Ingredient
-	for rrows.Next() {
-		var ing models.Ingredient
-		var typ string
-		if err := rrows.Scan(&ing.ID, &ing.Name, &typ, &ing.Unit, &ing.Amount, &ing.Notes, &ing.CreatedAt, &ing.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("GetProduct recipe scan: %w", err)
-		}
-		ing.Type = models.IngredientType(typ)
-		recipe = append(recipe, ing)
-	}
-	p.Recipe = recipe
-
-	return &p, nil
+	prods, err := db.GetProducts(ctx, 0, id)
+	return &prods[0], err
 }
 
 // CreateProductTx creates a product and its recipe items in a single transaction.
@@ -253,7 +225,6 @@ func (db *DB) GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.Sub
 		}
 		subscriptionBoxes = append(subscriptionBoxes, subscriptionBox)
 	}
-	spew.Dump(subscriptionBoxes)
 	return subscriptionBoxes, nil
 }
 

@@ -41,6 +41,7 @@ services:
     depends_on:
       - users
       - products
+      - inventory
     networks:
       - mixienet
 
@@ -50,6 +51,20 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8082:8082"
+    depends_on:
+      - postgres
+      - inventory
+    environment:
+      - DATABASE_URL=postgres://user:password@postgres/dbname?sslmode=disable
+    networks:
+      - mixienet
+
+  inventory:
+    build:
+      context: ./inventory
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
     depends_on:
       - postgres
     environment:

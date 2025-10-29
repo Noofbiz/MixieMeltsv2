@@ -36,14 +36,23 @@ type InventoryAdjustment struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// RecipeItem represents the amount of a single ingredient required to produce one unit
-// of a product (e.g., grams of wax, ml of scent per melt).
+/*
+RecipeItem represents a single ingredient entry for a product's recipe.
+
+This model is aligned with the products service recipe representation:
+  - stores the ingredient `name`, `type`, `unit`, and `amount` directly so the
+    products and inventory services can exchange recipe data without requiring a
+    cross-service lookup. The previous `IngredientID`/`Quantity` form assumed a
+    tight coupling to inventory ingredients; by storing the descriptive fields we
+    can keep recipe semantics consistent with the products service.
+*/
 type RecipeItem struct {
 	ID           int64     `json:"id"`
-	ProductID    int64     `json:"product_id"`      // references products service product id
-	IngredientID int64     `json:"ingredient_id"`   // references Ingredient.ID
-	Quantity     float64   `json:"quantity"`        // amount of ingredient per unit product (in Ingredient.Unit)
-	Notes        string    `json:"notes,omitempty"` // optional notes for the recipe step
+	ProductID    int64     `json:"product_id"`              // references products service product id
+	IngredientID int64     `json:"ingredient_id,omitempty"` // optional reference to inventory ingredient
+	Unit         string    `json:"unit"`                    // unit for the amount (e.g. "g", "ml")
+	Amount       float64   `json:"amount"`                  // amount of the ingredient per unit product
+	Notes        string    `json:"notes,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

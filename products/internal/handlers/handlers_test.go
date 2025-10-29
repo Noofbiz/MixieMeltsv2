@@ -15,7 +15,7 @@ import (
 
 // MockDB is a mock implementation of the DBLayer for testing purposes.
 type MockDB struct {
-	GetProductsFunc           func(ctx context.Context, limit int) ([]models.Product, error)
+	GetProductsFunc           func(ctx context.Context, limit int, id int64) ([]models.Product, error)
 	GetProductFunc            func(ctx context.Context, id int64) (*models.Product, error)
 	CreateProductFunc         func(ctx context.Context, product *models.Product) (int64, error)
 	CreateProductTxFunc       func(ctx context.Context, product *models.Product) (int64, error)
@@ -23,9 +23,9 @@ type MockDB struct {
 	CreateSubscriptionBoxFunc func(ctx context.Context, box *models.SubscriptionBox) (int64, error)
 }
 
-func (m *MockDB) GetProducts(ctx context.Context, limit int) ([]models.Product, error) {
+func (m *MockDB) GetProducts(ctx context.Context, limit int, id int64) ([]models.Product, error) {
 	if m.GetProductsFunc != nil {
-		return m.GetProductsFunc(ctx, limit)
+		return m.GetProductsFunc(ctx, limit, 0)
 	}
 	return nil, errors.New("GetProductsFunc not implemented")
 }
@@ -120,7 +120,7 @@ func TestGetProducts(t *testing.T) {
 		tc := tc // capture
 		t.Run(tc.name, func(t *testing.T) {
 			mockDB := &MockDB{
-				GetProductsFunc: func(ctx context.Context, limit int) ([]models.Product, error) {
+				GetProductsFunc: func(ctx context.Context, limit int, id int64) ([]models.Product, error) {
 					if tc.mockError != nil {
 						return nil, tc.mockError
 					}

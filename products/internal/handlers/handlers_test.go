@@ -8,30 +8,57 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"com.MixieMelts.products/internal/models"
 )
 
 // MockDB is a mock implementation of the DBLayer for testing purposes.
 type MockDB struct {
-	GetProductsFunc           func(ctx context.Context, limit int) ([]models.Product, error)
+	GetProductsFunc           func(ctx context.Context, limit int, id int64) ([]models.Product, error)
+	GetProductFunc            func(ctx context.Context, id int64) (*models.Product, error)
 	CreateProductFunc         func(ctx context.Context, product *models.Product) (int64, error)
+	CreateProductTxFunc       func(ctx context.Context, product *models.Product) (int64, error)
 	GetSubscriptionBoxesFunc  func(ctx context.Context, limit int) ([]models.SubscriptionBox, error)
 	CreateSubscriptionBoxFunc func(ctx context.Context, box *models.SubscriptionBox) (int64, error)
 }
 
-func (m *MockDB) GetProducts(ctx context.Context, limit int) ([]models.Product, error) {
+func (m *MockDB) GetProducts(ctx context.Context, limit int, id int64) ([]models.Product, error) {
 	if m.GetProductsFunc != nil {
-		return m.GetProductsFunc(ctx, limit)
+		return m.GetProductsFunc(ctx, limit, 0)
 	}
 	return nil, errors.New("GetProductsFunc not implemented")
 }
 
+func (m *MockDB) GetProduct(ctx context.Context, id int64) (*models.Product, error) {
+	if m.GetProductFunc != nil {
+		return m.GetProductFunc(ctx, id)
+	}
+	return nil, errors.New("GetProductFunc not implemented")
+}
+
+// CreateProduct remains for compatibility; prefer CreateProductTx in handlers/tests.
 func (m *MockDB) CreateProduct(ctx context.Context, product *models.Product) (int64, error) {
+	// If a non-transactional mock is provided, use it.
 	if m.CreateProductFunc != nil {
 		return m.CreateProductFunc(ctx, product)
 	}
+	// Otherwise, if a transactional mock exists, call that.
+	if m.CreateProductTxFunc != nil {
+		return m.CreateProductTxFunc(ctx, product)
+	}
 	return 0, errors.New("CreateProductFunc not implemented")
+}
+
+func (m *MockDB) CreateProductTx(ctx context.Context, product *models.Product) (int64, error) {
+	if m.CreateProductTxFunc != nil {
+		return m.CreateProductTxFunc(ctx, product)
+	}
+	// Fallback to non-transactional if provided
+	if m.CreateProductFunc != nil {
+		return m.CreateProductFunc(ctx, product)
+	}
+	return 0, errors.New("CreateProductTxFunc not implemented")
 }
 
 func (m *MockDB) GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.SubscriptionBox, error) {
@@ -93,7 +120,7 @@ func TestGetProducts(t *testing.T) {
 		tc := tc // capture
 		t.Run(tc.name, func(t *testing.T) {
 			mockDB := &MockDB{
-				GetProductsFunc: func(ctx context.Context, limit int) ([]models.Product, error) {
+				GetProductsFunc: func(ctx context.Context, limit int, id int64) ([]models.Product, error) {
 					if tc.mockError != nil {
 						return nil, tc.mockError
 					}
@@ -126,6 +153,72 @@ func TestGetProducts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Tests for GetProduct handler
+func TestGetProductHandler(t *testing.T) {
+	t.Run("ok found", func(t *testing.T) {
+		now := time.Now()
+		mockP := &models.Product{ID: 42, Name: "Test Product", Price: 9.99, Recipe: []models.Ingredient{{ID: 1, Name: "Soy Wax", Unit: "g", Amount: 100}}, CreatedAt: now, UpdatedAt: now}
+
+		mockDB := &MockDB{
+			GetProductFunc: func(ctx context.Context, id int64) (*models.Product, error) {
+				if id != mockP.ID {
+					return nil, nil
+				}
+				return mockP, nil
+			},
+		}
+
+		h := New(mockDB)
+		req, _ := http.NewRequest("GET", "/products/42", nil)
+		rr := httptest.NewRecorder()
+		// chi URLParam is not set by default; set it via Request context by using a router
+		// but simpler is to call handler with a request that has the URL set and rely on chi to parse.
+		h.GetProduct(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var got models.Product
+		if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.ID != mockP.ID || got.Name != mockP.Name || len(got.Recipe) != len(mockP.Recipe) {
+			t.Fatalf("unexpected product returned: %+v", got)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		mockDB := &MockDB{
+			GetProductFunc: func(ctx context.Context, id int64) (*models.Product, error) {
+				return nil, nil
+			},
+		}
+		h := New(mockDB)
+		req, _ := http.NewRequest("GET", "/products/999", nil)
+		rr := httptest.NewRecorder()
+		h.GetProduct(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("expected 404 got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("db error", func(t *testing.T) {
+		mockDB := &MockDB{
+			GetProductFunc: func(ctx context.Context, id int64) (*models.Product, error) {
+				return nil, errors.New("db fail")
+			},
+		}
+		h := New(mockDB)
+		req, _ := http.NewRequest("GET", "/products/1", nil)
+		rr := httptest.NewRecorder()
+		h.GetProduct(rr, req)
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
 }
 
 // Table-driven tests for CreateProduct
@@ -170,8 +263,9 @@ func TestCreateProduct(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			// For success case we also need GetProduct to return the saved product
 			mockDB := &MockDB{
-				CreateProductFunc: func(ctx context.Context, product *models.Product) (int64, error) {
+				CreateProductTxFunc: func(ctx context.Context, product *models.Product) (int64, error) {
 					if tc.mockCreateErr != nil {
 						return 0, tc.mockCreateErr
 					}
@@ -180,6 +274,15 @@ func TestCreateProduct(t *testing.T) {
 						return 0, errors.New("invalid product")
 					}
 					return tc.mockCreateID, nil
+				},
+				GetProductFunc: func(ctx context.Context, id int64) (*models.Product, error) {
+					if tc.mockCreateErr != nil {
+						return nil, tc.mockCreateErr
+					}
+					// return the product as if it was saved (simple copy)
+					p := validProduct
+					p.ID = tc.mockCreateID
+					return &p, nil
 				},
 			}
 
@@ -341,4 +444,162 @@ func TestSubscriptionBoxes(t *testing.T) {
 			})
 		}
 	})
+}
+
+// Table-driven tests for recipe items (creation and GET behavior)
+func TestRecipeItems(t *testing.T) {
+	now := time.Now()
+	// Define some sample recipe items used in tests
+	sampleRecipe := []models.Ingredient{
+		{ID: 1, Name: "Soy Wax", Type: models.IngredientType("Base"), Unit: "g", Amount: 100},
+		{ID: 2, Name: "Lavender", Type: models.IngredientType("Essential Oil"), Unit: "mL", Amount: 3},
+	}
+
+	tests := []struct {
+		name           string
+		createPayload  models.Product
+		mockCreateID   int64
+		mockCreateErr  error
+		mockGetProduct *models.Product
+		mockGetErr     error
+		wantStatus     int
+		wantRecipeLen  int
+		wantFirstName  string
+	}{
+		{
+			name: "create with recipe success",
+			createPayload: models.Product{
+				Name:  "Recipe Product",
+				Price: 4.99,
+				Recipe: []models.Ingredient{
+					{Name: "Soy Wax", Type: models.IngredientType("Base"), Unit: "g", Amount: 100},
+					{Name: "Lavender", Type: models.IngredientType("Essential Oil"), Unit: "mL", Amount: 3},
+				},
+			},
+			mockCreateID:  2001,
+			mockCreateErr: nil,
+			mockGetProduct: &models.Product{
+				ID:        2001,
+				Name:      "Recipe Product",
+				Price:     4.99,
+				Recipe:    sampleRecipe,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			mockGetErr:    nil,
+			wantStatus:    http.StatusCreated,
+			wantRecipeLen: 2,
+			wantFirstName: "Soy Wax",
+		},
+		{
+			name: "create with empty recipe",
+			createPayload: models.Product{
+				Name:   "NoRecipe Product",
+				Price:  2.50,
+				Recipe: []models.Ingredient{},
+			},
+			mockCreateID:  2002,
+			mockCreateErr: nil,
+			mockGetProduct: &models.Product{
+				ID:     2002,
+				Name:   "NoRecipe Product",
+				Price:  2.50,
+				Recipe: []models.Ingredient{},
+			},
+			mockGetErr:    nil,
+			wantStatus:    http.StatusCreated,
+			wantRecipeLen: 0,
+			wantFirstName: "",
+		},
+		{
+			name: "db error on create",
+			createPayload: models.Product{
+				Name:  "BadCreate",
+				Price: 1.99,
+			},
+			mockCreateID:   0,
+			mockCreateErr:  errors.New("db error"),
+			mockGetProduct: nil,
+			mockGetErr:     nil,
+			wantStatus:     http.StatusInternalServerError,
+			wantRecipeLen:  0,
+			wantFirstName:  "",
+		},
+		{
+			name: "db error on get after create",
+			createPayload: models.Product{
+				Name:  "CreatedButGetFails",
+				Price: 3.33,
+				Recipe: []models.Ingredient{
+					{Name: "Butter", Type: models.IngredientType("Dairy"), Unit: "g", Amount: 50},
+				},
+			},
+			mockCreateID:   2003,
+			mockCreateErr:  nil,
+			mockGetProduct: nil,
+			mockGetErr:     errors.New("db get fail"),
+			wantStatus:     http.StatusInternalServerError,
+			wantRecipeLen:  0,
+			wantFirstName:  "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Prepare mock DB
+			mockDB := &MockDB{
+				CreateProductTxFunc: func(ctx context.Context, product *models.Product) (int64, error) {
+					if tc.mockCreateErr != nil {
+						return 0, tc.mockCreateErr
+					}
+					// return configured id
+					return tc.mockCreateID, nil
+				},
+				GetProductFunc: func(ctx context.Context, id int64) (*models.Product, error) {
+					if tc.mockGetErr != nil {
+						return nil, tc.mockGetErr
+					}
+					// if mock product configured, return it; otherwise nil
+					if tc.mockGetProduct != nil && tc.mockGetProduct.ID == id {
+						return tc.mockGetProduct, nil
+					}
+					// simulate not found
+					return nil, nil
+				},
+			}
+
+			handler := New(mockDB)
+
+			// Encode payload
+			payload, err := json.Marshal(tc.createPayload)
+			if err != nil {
+				t.Fatalf("failed to marshal payload: %v", err)
+			}
+
+			req, _ := http.NewRequest("POST", "/products", bytes.NewBuffer(payload))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+
+			handler.CreateProduct(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("unexpected status: got %d want %d; body: %s", rr.Code, tc.wantStatus, rr.Body.String())
+			}
+
+			if tc.wantStatus == http.StatusCreated {
+				var out models.Product
+				if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+					t.Fatalf("failed to decode created product: %v", err)
+				}
+				// verify recipe length and first item name when applicable
+				if len(out.Recipe) != tc.wantRecipeLen {
+					t.Fatalf("expected recipe len %d got %d", tc.wantRecipeLen, len(out.Recipe))
+				}
+				if tc.wantFirstName != "" && out.Recipe[0].Name != tc.wantFirstName {
+					t.Fatalf("expected first recipe name %q got %q", tc.wantFirstName, out.Recipe[0].Name)
+				}
+			}
+		})
+	}
 }

@@ -10,7 +10,7 @@ const Header = ({ setPage }) => {
       <nav className="container mx-auto px-6 py-4 flex justify-between items-center">
         <div
           className="text-2xl font-bold font-serif text-brown-900 cursor-pointer"
-          onClick={() => setPage("home")}
+          onClick={() => setPage("home", undefined)}
         >
           Mixie Melts
         </div>
@@ -18,21 +18,21 @@ const Header = ({ setPage }) => {
           <a
             href="#"
             className="text-brown-800 hover:text-terracotta-500 transition-colors"
-            onClick={() => setPage("home")}
+            onClick={() => setPage("home", undefined)}
           >
             Home
           </a>
           <a
             href="#"
             className="text-brown-800 hover:text-terracotta-500 transition-colors"
-            onClick={() => setPage("products")}
+            onClick={() => setPage("products", undefined)}
           >
             Products
           </a>
           <a
             href="#"
             className="relative text-brown-800 hover:text-terracotta-500 transition-colors"
-            onClick={() => setPage("cart")}
+            onClick={() => setPage("cart", undefined)}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -59,14 +59,14 @@ const Header = ({ setPage }) => {
               <a
                 href="#"
                 className="text-brown-800 hover:text-terracotta-500 transition-colors"
-                onClick={() => setPage("account")}
+                onClick={() => setPage("account", undefined)}
               >
                 My Account
               </a>
               <button
                 onClick={() => {
                   logout();
-                  setPage("home");
+                  setPage("home", undefined);
                 }}
                 className="px-4 py-2 text-sm text-terracotta-600 border border-terracotta-600 rounded-full hover:bg-terracotta-600 hover:text-cream-100 transition-colors"
               >
@@ -75,7 +75,7 @@ const Header = ({ setPage }) => {
             </div>
           ) : (
             <button
-              onClick={() => setPage("login")}
+              onClick={() => setPage("login", undefined)}
               className="px-5 py-2 text-sm bg-terracotta-500 text-cream-100 rounded-full hover:bg-terracotta-600 transition-colors"
             >
               Login

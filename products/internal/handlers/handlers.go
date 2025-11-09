@@ -3,16 +3,29 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"com.MixieMelts.products/internal/models"
+	"github.com/go-chi/chi/v5"
 )
 
 // Handler represents the HTTP handlers for the service.
 type DBLayer interface {
-	GetProducts(ctx context.Context, limit int) ([]models.Product, error)
+	// GetProducts returns multiple products (optionally limited).
+	GetProducts(ctx context.Context, limit int, prodID int64) ([]models.Product, error)
+
+	// GetProduct returns a single product by id including its recipe.
+	GetProduct(ctx context.Context, id int64) (*models.Product, error)
+
+	// CreateProduct inserts a product without guaranteeing transactional recipe inserts.
 	CreateProduct(ctx context.Context, product *models.Product) (int64, error)
+
+	// CreateProductTx inserts a product and its recipe atomically in a transaction.
+	CreateProductTx(ctx context.Context, product *models.Product) (int64, error)
+
 	GetSubscriptionBoxes(ctx context.Context, limit int) ([]models.SubscriptionBox, error)
 	CreateSubscriptionBox(ctx context.Context, box *models.SubscriptionBox) (int64, error)
 }
@@ -38,16 +51,68 @@ func (h *Handler) GetProducts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	products, err := h.db.GetProducts(r.Context(), limit)
+	products, err := h.db.GetProducts(r.Context(), limit, 0)
 	if err != nil {
+		println(err.Error())
 		respondWithError(w, http.StatusInternalServerError, "Failed to get products")
 		return
 	}
+	// Ensure recipe is a non-nil slice for the frontend (avoid JSON `null`).
+	for i := range products {
+		if products[i].Recipe == nil {
+			products[i].Recipe = []models.Ingredient{}
+		}
+	}
+	log.Printf("handlers: returning %d products (limit=%d)", len(products), limit)
 	respondWithJSON(w, http.StatusOK, products)
 }
 
+// GetProduct handles GET requests to /products/{id}.
+func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+
+	// If chi did not populate the URL param (tests often create a request
+	// directly with a path like "/products/42"), attempt to extract the id
+	// from the request path as a fallback.
+	if idStr == "" {
+		trimmed := strings.Trim(r.URL.Path, "/")
+		parts := strings.Split(trimmed, "/")
+		if len(parts) > 0 {
+			idStr = parts[len(parts)-1]
+		}
+	}
+
+	if idStr == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing product id")
+		return
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid product id")
+		return
+	}
+
+	product, err := h.db.GetProduct(r.Context(), id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to get product")
+		return
+	}
+	if product == nil {
+		respondWithError(w, http.StatusNotFound, "Product not found")
+		return
+	}
+	// Ensure recipe is a non-nil slice to prevent JSON null in the frontend.
+	if product.Recipe == nil {
+		product.Recipe = []models.Ingredient{}
+	}
+	log.Printf("handlers: returning product id=%d with %d recipe items", product.ID, len(product.Recipe))
+	respondWithJSON(w, http.StatusOK, product)
+}
+
 // CreateProduct handles POST requests to /products.
+// This handler expects the database layer to provide a transactional create
+// that inserts the product and its recipe atomically.
 func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 	var product models.Product
 	if err := json.NewDecoder(r.Body).Decode(&product); err != nil {
@@ -55,15 +120,32 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	productID, err := h.db.CreateProduct(r.Context(), &product)
+	// Prefer transactional creation to ensure product + recipe are inserted atomically.
+	productID, err := h.db.CreateProductTx(r.Context(), &product)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create product")
 		return
 	}
 
-	product.ID = productID
+	// After creation, retrieve the product as stored in the DB so we return the
+	// authoritative representation (including any recipe items inserted by the DB).
+	created, err := h.db.GetProduct(r.Context(), productID)
+	if err != nil {
+		// Treat inability to retrieve the created product as an internal server error.
+		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve created product")
+		return
+	}
+	if created == nil {
+		respondWithError(w, http.StatusBadRequest, "Created product not found")
+		return
+	}
 
-	respondWithJSON(w, http.StatusCreated, product)
+	// Ensure recipe is non-nil for JSON consumers.
+	if created.Recipe == nil {
+		created.Recipe = []models.Ingredient{}
+	}
+
+	respondWithJSON(w, http.StatusCreated, created)
 }
 
 // GetSubscriptionBoxes handles GET requests to /subscription-boxes.

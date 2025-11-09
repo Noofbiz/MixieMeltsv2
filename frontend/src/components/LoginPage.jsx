@@ -36,8 +36,30 @@ const LoginView = ({ setPage, setIsLogin }) => {
       }
 
       const { token } = await response.json();
-      // In a real app, you would fetch the user profile here
-      login({ email }, token);
+
+      // Fetch the user's profile using the token so we have the full user object
+      const profileResp = await fetch("/api/users/me", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!profileResp.ok) {
+        // Try to surface any server error message when possible
+        let msg = "Failed to fetch user profile";
+        try {
+          const errData = await profileResp.json();
+          if (errData && errData.message) msg = errData.message;
+        } catch {
+          // ignore JSON parse errors
+        }
+        throw new Error(msg);
+      }
+
+      const user = await profileResp.json();
+
+      // Use the full user object when logging in
+      login(user, token);
       setPage("home");
     } catch (err) {
       setError(err.message);

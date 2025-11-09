@@ -43,6 +43,7 @@ func main() {
 	}).Handler)
 
 	r.Get("/products", h.GetProducts)
+	r.Get("/products/{id}", h.GetProduct)
 	r.Post("/products", h.CreateProduct)
 
 	r.Get("/products/subscription-boxes", h.GetSubscriptionBoxes)

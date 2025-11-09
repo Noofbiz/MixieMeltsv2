@@ -2,12 +2,26 @@ import { useCart } from "../context/Context";
 
 const ProductCard = ({ product }) => {
   const { dispatch } = useCart();
-  const handleAddToCart = () => {
+  const handleAddToCart = (e) => {
+    // prevent the click from bubbling to the card's click handler
+    e.stopPropagation();
     dispatch({ type: "ADD_ITEM", payload: product });
   };
 
+  const openDetail = () => {
+    // Navigate to product detail using history API and notify the app.
+    if (!product || product.id == null) return;
+    const path = `/products/${product.id}`;
+    window.history.pushState({}, "", path);
+    // Trigger popstate so the SPA route handler notices the change.
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden transform hover:scale-105 hover:shadow-xl transition-all duration-300 group">
+    <div
+      onClick={openDetail}
+      className="bg-white rounded-xl shadow-lg overflow-hidden transform hover:scale-105 hover:shadow-xl transition-all duration-300 group cursor-pointer"
+    >
       <img
         src={product.image}
         alt={product.name}
@@ -20,7 +34,7 @@ const ProductCard = ({ product }) => {
         <p className="text-brown-700 mt-2 text-sm">{product.scent}</p>
         <div className="mt-4 flex justify-between items-center">
           <span className="text-2xl font-bold font-sans text-brown-800">
-            ${product.price.toFixed(2)}
+            ${product.price != null ? product.price.toFixed(2) : "0.00"}
           </span>
           <button
             onClick={handleAddToCart}

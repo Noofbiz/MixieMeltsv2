@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"com.MixieMelts.products/internal/models"
 	"github.com/go-chi/chi/v5"
@@ -69,10 +70,23 @@ func (h *Handler) GetProducts(w http.ResponseWriter, r *http.Request) {
 // GetProduct handles GET requests to /products/{id}.
 func (h *Handler) GetProduct(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
+
+	// If chi did not populate the URL param (tests often create a request
+	// directly with a path like "/products/42"), attempt to extract the id
+	// from the request path as a fallback.
+	if idStr == "" {
+		trimmed := strings.Trim(r.URL.Path, "/")
+		parts := strings.Split(trimmed, "/")
+		if len(parts) > 0 {
+			idStr = parts[len(parts)-1]
+		}
+	}
+
 	if idStr == "" {
 		respondWithError(w, http.StatusBadRequest, "Missing product id")
 		return
 	}
+
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid product id")
@@ -113,9 +127,25 @@ func (h *Handler) CreateProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	product.ID = productID
+	// After creation, retrieve the product as stored in the DB so we return the
+	// authoritative representation (including any recipe items inserted by the DB).
+	created, err := h.db.GetProduct(r.Context(), productID)
+	if err != nil {
+		// Treat inability to retrieve the created product as an internal server error.
+		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve created product")
+		return
+	}
+	if created == nil {
+		respondWithError(w, http.StatusBadRequest, "Created product not found")
+		return
+	}
 
-	respondWithJSON(w, http.StatusCreated, product)
+	// Ensure recipe is non-nil for JSON consumers.
+	if created.Recipe == nil {
+		created.Recipe = []models.Ingredient{}
+	}
+
+	respondWithJSON(w, http.StatusCreated, created)
 }
 
 // GetSubscriptionBoxes handles GET requests to /subscription-boxes.

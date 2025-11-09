@@ -319,7 +319,7 @@ describe("Authentication and Authorization", () => {
     ).not.toBeNull();
 
     // Navigate to account page
-    fireEvent.click(screen.getAllByText("My Account")[1]);
+    fireEvent.click(screen.getAllByText("My Account")[0]);
 
     // Verify admin can see theiSr email AND the admin panel
     await waitFor(() => {

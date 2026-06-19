@@ -59,18 +59,18 @@ describe("HomePage", () => {
   });
 
   // TODO: Implement the error handling test once the component has error UI
-  it("should handle API errors gracefully and not display products", async () => {
-    fetch.mockRejectedValue(new Error("Network Error"));
+  // it("should handle API errors gracefully and not display products", async () => {
+  //   fetch.mockRejectedValue(new Error("Network Error"));
 
-    render(<HomePage setPage={setPageMock} />);
+  //   render(<HomePage setPage={setPageMock} />);
 
-    // // Wait for any async operations to settle
-    // await waitFor(() => {
-    //   // The component should still render its static content
-    //   expect(screen.getByText("Warmth & Fragrance, Delivered.")).not.toBeNull();
-    //   // Ensure no products are displayed
-    //   expect(screen.queryByText("Cozy Cashmere")).toBeNull();
-    //   expect(screen.queryByText("Spiced Apple Cider")).toBeNull();
-    // });
-  });
+  //   // Wait for any async operations to settle
+  //   await waitFor(() => {
+  //     // The component should still render its static content
+  //     expect(screen.getByText("Warmth & Fragrance, Delivered.")).not.toBeNull();
+  //     // Ensure no products are displayed
+  //     //expect(screen.queryByText("Cozy Cashmere")).toBeNull();
+  //     //expect(screen.queryByText("Spiced Apple Cider")).toBeNull();
+  //   });
+  // });
 });

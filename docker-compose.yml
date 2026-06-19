@@ -72,6 +72,21 @@ services:
     networks:
       - mixienet
 
+  carts:
+    build:
+      context: ./carts
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8084"
+    depends_on:
+      - postgres
+      - inventory
+    environment:
+      - DATABASE_URL=postgres://user:password@postgres/dbname?sslmode=disable
+      - INVENTORY_SERVICE_URL=http://inventory:8083
+    networks:
+      - mixienet
+
 volumes:
   postgres_data:
 

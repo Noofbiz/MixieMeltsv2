@@ -1,11 +1,12 @@
 import { useCart } from "../context/Context";
 
 const ProductCard = ({ product }) => {
-  const { dispatch } = useCart();
+  const { addItemToCart } = useCart();
   const handleAddToCart = (e) => {
     // prevent the click from bubbling to the card's click handler
     e.stopPropagation();
-    dispatch({ type: "ADD_ITEM", payload: product });
+    // Use the backend-aware helper which performs an optimistic update and persists to the carts service when possible
+    addItemToCart(product, 1);
   };
 
   const openDetail = () => {

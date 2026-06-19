@@ -1,0 +1,93 @@
+name: Go CI - Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: go-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: dbname
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U user -d dbname" --health-interval=5s --health-timeout=2s --health-retries=10
+
+    env:
+      # match the service credentials above
+      DATABASE_URL: postgres://user:password@localhost:5432/dbname?sslmode=disable
+      # Base URL for the users service (used by handlers that validate tokens).
+      # In CI we don't start the full users service, but unit tests may mock it;
+      # having this env var available mirrors the runtime config used locally/docker.
+      USERS_SERVICE_URL: http://localhost:8080
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Display go env
+        run: go env
+
+      - name: Download dependencies
+        run: go mod download ./...
+
+      - name: Wait for Postgres to be ready (if present)
+        run: |
+          # Try pg_isready if available, else fallback to nc
+          for i in $(seq 1 30); do
+            if command -v pg_isready >/dev/null 2>&1; then
+              pg_isready -h localhost -p 5432 -U user && break
+            fi
+            if command -v nc >/dev/null 2>&1; then
+              nc -z localhost 5432 && break
+            fi
+            echo "Waiting for Postgres to be ready ($i/30)..."
+            sleep 1
+          done
+
+      - name: Run DB migrations for carts
+        run: |
+          echo "Running migrations for carts service via dockerized migrate (no local CLI)"
+          # Use the carts Makefile to invoke the docker-based migrate target which
+          # uses the official migrate image. This avoids installing the migrate CLI
+          # in the runner.
+          cd MixieMeltsv2/carts
+          make docker-migrate-up
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - name: Run repo tests (frontend + services)
+        run: |
+          # Run frontend tests and service tests via the top-level Makefile.
+          # Ensure we run from the repository root where the top-level Makefile lives.
+          cd MixieMeltsv2
+          make test

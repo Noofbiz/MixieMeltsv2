@@ -1,20 +1,21 @@
 import { useCart } from "../context/Context";
 
 const CartPage = () => {
-  const { cart, dispatch } = useCart();
+  const { cart, updateItemQuantity, removeItemFromCart } = useCart();
   const totalPrice = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
+    (sum, item) => sum + (item.price || 0) * (item.quantity || 0),
     0,
   );
 
   const handleQuantityChange = (id, quantity) => {
-    dispatch({
-      type: "UPDATE_QUANTITY",
-      payload: { id, quantity: parseInt(quantity, 10) },
-    });
+    // id refers to the product id in the frontend shape
+    updateItemQuantity(id, parseInt(quantity, 10));
   };
   const handleRemove = (itemToRemove) => {
-    dispatch({ type: "REMOVE_ITEM", payload: itemToRemove });
+    // itemToRemove may be the full item object or a product id
+    const productId =
+      itemToRemove && itemToRemove.id ? itemToRemove.id : itemToRemove;
+    removeItemFromCart(productId);
   };
 
   const handleCheckout = () => {
@@ -61,7 +62,7 @@ const CartPage = () => {
                   min="1"
                 />
                 <p className="text-lg font-semibold w-24 text-right text-brown-800">
-                  ${(item.price * item.quantity).toFixed(2)}
+                  ${((item.price || 0) * (item.quantity || 0)).toFixed(2)}
                 </p>
                 <button
                   onClick={() => handleRemove(item)}
